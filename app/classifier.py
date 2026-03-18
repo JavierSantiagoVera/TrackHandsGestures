@@ -92,7 +92,7 @@ class RealtimeClassifier:
     @torch.inference_mode()
     def predict(self):
         if not self.ready():
-            return None, "BASE", None
+            return None, "sin prediccion", None
 
         x_np = self._sequence()
         x = torch.from_numpy(x_np).unsqueeze(0).to(self.device)  # (1,T,F)
@@ -101,7 +101,7 @@ class RealtimeClassifier:
 
         pred_idx = int(np.argmax(probs[0]))
         conf = float(probs[0, pred_idx])
-        thr = float(getattr(cfg, "CONF_THRESH", 0.60))
+        thr = float(getattr(cfg, "CONF_THRESH", 0.75))
 
         if conf >= thr:
             self.last_idx = pred_idx
@@ -114,4 +114,4 @@ class RealtimeClassifier:
             self.hold_left -= 1
             return self.last_idx, self.class_names[self.last_idx], self.last_probs
 
-        return None, "BASE", None
+        return None, "sin prediccion", None
