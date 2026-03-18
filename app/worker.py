@@ -243,14 +243,14 @@ class HandWorker(QThread):
 
                     if probs is None or pred_idx is None:
                         # estado base
-                        self.pred_ready.emit("BASE", 0.0, None)
+                        self.pred_ready.emit("sin prediccion", 0.0, None)
                     else:
                         conf = float(probs[0][pred_idx])
                         self.pred_ready.emit(pred_name, conf, probs)
             else:
                 # No hay mano -> estado base inmediato
                 self.classifier.reset()
-                self.pred_ready.emit("BASE", 0.0, None)
+                self.pred_ready.emit("sin prediccion", 0.0, None)
 
             # --- Grabación (contador incluido)
             with QMutexLocker(self._rec_mutex):
