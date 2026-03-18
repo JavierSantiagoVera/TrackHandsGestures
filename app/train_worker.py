@@ -36,8 +36,8 @@ class TrainWorker(QThread):
             fdim = int(getattr(cfg, "FEATURE_DIM", 64))
 
             ds = _NpzSeqDataset(self.npz_path, seq_len=seq_len, fdim=fdim)
-            if len(ds) < 6:
-                self.done.emit(False, f"Dataset muy pequeño (N={len(ds)}). Graba más muestras.")
+            if len(ds) < 1:
+                self.done.emit(False, f"Dataset vacío (N={len(ds)}). Graba al menos una muestra.")
                 return
 
             batch = int(getattr(cfg, "TRAIN_BATCH", 64))

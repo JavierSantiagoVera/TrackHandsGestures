@@ -1,11 +1,11 @@
-from PySide6.QtCore import Qt, Slot, QMetaObject, Q_ARG, QTimer
+from PySide6.QtCore import Qt, Slot, QMetaObject, Q_ARG, QTimer, QEvent
 from PySide6.QtWidgets import (
     QWidget, QLabel, QHBoxLayout, QVBoxLayout, QSizePolicy,
     QPushButton, QMessageBox, QProgressBar, QLineEdit, QFileDialog
 )
 
 import os
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QGuiApplication
 
 from .config import MODEL_TASK_PATH, SEQ_LEN, DATASET_PATH, LSTM_CKPT_PATH, DEFAULT_CLASSES
 from .qt_utils import bgr_to_pixmap
@@ -22,31 +22,49 @@ class MainWindow(QWidget):
         super().__init__()
         self.setWindowTitle("Sign Tracker (LSC) - LSTM")
 
+        # Screen-relative sizing (reference: 1920×1080 @ 100%)
+        # s < 1 en pantallas pequeñas o con escala Windows alta (ej. 1080p@150% = 720p lógico)
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        sw, sh = screen.width(), screen.height()
+        self._scale = min(sw / 1920.0, sh / 1080.0)   # usa la dim más restrictiva
+        s = self._scale
+
+        right_w   = max(200, int(sw * 0.19))   # ~19% del ancho
+        lm_size   = max(180, int(sh * 0.27))   # widget de landmarks: 27% del alto
+        icon_size = max(60,  int(sh * 0.09))   # icono predicción: 9% del alto
+
         # Dataset (features)
         self.ds = DatasetStore(DATASET_PATH, seq_len=SEQ_LEN)
 
         # -----------------------------
-        # UI: Video grande
+        # UI: Video grande + overlay de icono
         # -----------------------------
-        self.video = QLabel("Iniciando...")
+        self.video_container = QWidget()
+        self.video_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.video_container.installEventFilter(self)
+
+        self.video = QLabel("Iniciando...", self.video_container)
         self.video.setAlignment(Qt.AlignCenter)
-        self.video.setMinimumSize(900, 600)
         self.video.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        vc_layout = QVBoxLayout(self.video_container)
+        vc_layout.setContentsMargins(0, 0, 0, 0)
+        vc_layout.addWidget(self.video)
 
         # -----------------------------
         # UI: Panel derecho
         # -----------------------------
         self.landmarks_view = LandmarkToggleWidget()
-        self.landmarks_view.setFixedWidth(330)
-        self.landmarks_view.setFixedHeight(380)
+        self.landmarks_view.setFixedWidth(right_w)
+        self.landmarks_view.setFixedHeight(lm_size)
 
         self.pred_label = QLabel("Pred: -")
         self.pred_label.setAlignment(Qt.AlignCenter)
-        self.pred_label.setStyleSheet("font-size: 26px; font-weight: bold;")
+        self.pred_label.setStyleSheet(f"font-size: {max(14, int(26*s))}px; font-weight: bold;")
 
         self.conf_label = QLabel("Conf: -")
         self.conf_label.setAlignment(Qt.AlignCenter)
-        self.conf_label.setStyleSheet("font-size: 16px;")
+        self.conf_label.setStyleSheet(f"font-size: {max(10, int(16*s))}px;")
 
         # Labels/clases (dinámico)
         self.class_meta = load_ui_classes()
@@ -56,11 +74,17 @@ class MainWindow(QWidget):
         self._icon_cache = {}  # path -> QPixmap
         self.class_controls = []
 
-        self.icon_label = QLabel("")
+        # Icono flotante sobre el video (top-right)
+        self.icon_label = QLabel("", self.video_container)
         self.icon_label.setAlignment(Qt.AlignCenter)
-        self.icon_label.setFixedSize(140, 140)
-        self.icon_label.setStyleSheet("border: 1px solid #ccc;")
+        self.icon_label.setFixedSize(icon_size, icon_size)
+        self.icon_label.setStyleSheet(
+            "border: 2px solid rgba(255,255,255,180);"
+            "background: rgba(0,0,0,120);"
+            "border-radius: 6px;"
+        )
         self.icon_label.setVisible(False)
+        self.icon_label.raise_()
 
         # Dataset counts
         self.counts_label = QLabel(self._counts_text())
@@ -77,18 +101,20 @@ class MainWindow(QWidget):
         # -----------------------------
         self.countdown_label = QLabel("")
         self.countdown_label.setAlignment(Qt.AlignCenter)
-        self.countdown_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        self.countdown_label.setStyleSheet(f"font-size: {max(10, int(18*s))}px; font-weight: bold;")
 
         self.rec_bar = QProgressBar()
         self.rec_bar.setRange(0, SEQ_LEN)
         self.rec_bar.setValue(0)
         self.rec_bar.setTextVisible(False)
-        self.rec_bar.setFixedHeight(10)
+        self.rec_bar.setFixedHeight(max(6, int(10*s)))
 
         # Botones: añadir muestra (una secuencia de T frames)
         # (asegura que existan 3 nombres)
         while len(self.class_names) < 3:
             self.class_names.append(f"Clase_{len(self.class_names)}")
+
+        btn_h = max(24, int(32*s))
 
         self.btn_add0 = QPushButton(f"Añadir muestra: {self.class_names[0]} ({SEQ_LEN}f)")
         self.btn_add1 = QPushButton(f"Añadir muestra: {self.class_names[1]} ({SEQ_LEN}f)")
@@ -96,8 +122,15 @@ class MainWindow(QWidget):
         self.btn_cancel = QPushButton("Cancelar grabación")
         self.btn_cancel.setEnabled(False)
 
+        self.btn_reset_ds = QPushButton("Resetear dataset")
+        self.btn_reset_ds.setStyleSheet("color: #c0392b;")
+
+        for btn in (self.btn_add0, self.btn_add1, self.btn_add2, self.btn_cancel, self.btn_reset_ds):
+            btn.setMinimumHeight(btn_h)
+
         # Entrenar
         self.btn_train = QPushButton("Entrenar modelo (LSTM)")
+        self.btn_train.setMinimumHeight(btn_h)
 
         # Pre-grabación
         self.pre_record_timer = None
@@ -109,14 +142,13 @@ class MainWindow(QWidget):
         # -----------------------------
         right = QVBoxLayout()
         right.addWidget(self.landmarks_view, 0, Qt.AlignTop)
-        right.addWidget(self.icon_label, 0, Qt.AlignRight)
 
         right.addWidget(self.pred_label, 0)
         right.addWidget(self.conf_label, 0)
 
         self.class_title = QLabel("Clases (nombre e icono)")
         self.class_title.setAlignment(Qt.AlignCenter)
-        self.class_title.setStyleSheet("font-weight: bold; margin-top: 6px;")
+        self.class_title.setStyleSheet(f"font-weight: bold; margin-top: {max(3, int(6*s))}px;")
         right.addWidget(self.class_title, 0)
 
         class_edit_box = QVBoxLayout()
@@ -133,23 +165,28 @@ class MainWindow(QWidget):
         right.addWidget(self.counts_label, 0)
 
         # Contador/barra (debajo de counts, antes de botones)
-        right.addSpacing(8)
+        right.addSpacing(max(4, int(8*s)))
         right.addWidget(self.countdown_label, 0)
         right.addWidget(self.rec_bar, 0)
 
-        right.addSpacing(10)
+        right.addSpacing(max(6, int(10*s)))
         right.addWidget(self.btn_add0, 0)
         right.addWidget(self.btn_add1, 0)
         right.addWidget(self.btn_add2, 0)
         right.addWidget(self.btn_cancel, 0)
+        right.addWidget(self.btn_reset_ds, 0)
 
-        right.addSpacing(10)
+        right.addSpacing(max(6, int(10*s)))
         right.addWidget(self.btn_train, 0)
         right.addWidget(self.status, 1)
 
+        right_panel = QWidget()
+        right_panel.setLayout(right)
+        right_panel.setFixedWidth(right_w)
+
         root = QHBoxLayout(self)
-        root.addWidget(self.video, 1)
-        root.addLayout(right, 0)
+        root.addWidget(self.video_container, 1)
+        root.addWidget(right_panel, 0)
 
         # -----------------------------
         # Worker cámara
@@ -174,6 +211,7 @@ class MainWindow(QWidget):
         self.btn_add1.clicked.connect(lambda: self._schedule_recording(1))
         self.btn_add2.clicked.connect(lambda: self._schedule_recording(2))
         self.btn_cancel.clicked.connect(self.on_cancel_clicked)
+        self.btn_reset_ds.clicked.connect(self.reset_dataset)
 
         # Entrenamiento
         self.train_worker = None
@@ -181,6 +219,37 @@ class MainWindow(QWidget):
 
         self.worker.start()
         self._push_class_names_to_worker()
+
+    # --- Overlay del icono sobre el video ---
+
+    def eventFilter(self, obj, event):
+        if obj is self.video_container and event.type() == QEvent.Resize:
+            self._reposition_icon()
+        return super().eventFilter(obj, event)
+
+    def _reposition_icon(self):
+        margin = 10
+        iw, ih = self.icon_label.width(), self.icon_label.height()
+        cw = self.video_container.width()
+        self.icon_label.move(cw - iw - margin, margin)
+
+    # --- Reset dataset ---
+
+    @Slot()
+    def reset_dataset(self):
+        reply = QMessageBox.question(
+            self, "Resetear dataset",
+            "¿Seguro que quieres borrar TODAS las muestras?\nEsta acción no se puede deshacer.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self.ds.X = []
+        self.ds.y = []
+        if os.path.exists(self.ds.path):
+            os.remove(self.ds.path)
+        self.counts_label.setText(self._counts_text())
+        self.status.setText("Dataset reseteado.")
 
     def _counts_text(self):
         counts = self.ds.counts(num_classes=3)
@@ -206,6 +275,7 @@ class MainWindow(QWidget):
             self.class_meta.append({"name": f"Clase_{len(self.class_meta)}", "icon": ""})
 
     def _create_class_editor(self, idx: int):
+        s = self._scale
         wrapper = QVBoxLayout()
         wrapper.setContentsMargins(0, 0, 0, 0)
 
@@ -216,7 +286,7 @@ class MainWindow(QWidget):
         name_row.addWidget(name_label, 0)
         name_row.addWidget(name_edit, 1)
         reset_btn = QPushButton("Reset")
-        reset_btn.setFixedWidth(60)
+        reset_btn.setFixedWidth(max(44, int(60*s)))
         reset_btn.clicked.connect(lambda _, i=idx: self._reset_class_name(i))
         name_row.addWidget(reset_btn, 0)
         name_edit.editingFinished.connect(
@@ -224,15 +294,15 @@ class MainWindow(QWidget):
         )
 
         icon_row = QHBoxLayout()
-        icon_row.setContentsMargins(16, 0, 0, 6)
+        icon_row.setContentsMargins(max(8, int(16*s)), 0, 0, max(3, int(6*s)))
         icon_button = QPushButton("Icono...")
         icon_button.clicked.connect(lambda _, i=idx: self._choose_icon(i))
         clear_button = QPushButton("Quitar")
-        clear_button.setFixedWidth(70)
+        clear_button.setFixedWidth(max(50, int(70*s)))
         clear_button.clicked.connect(lambda _, i=idx: self._clear_icon(i))
         icon_info = QLabel(self._icon_path_display(idx))
         icon_info.setWordWrap(True)
-        icon_info.setStyleSheet("font-size: 11px; color: #555;")
+        icon_info.setStyleSheet(f"font-size: {max(8, int(11*s))}px; color: #555;")
         icon_row.addWidget(icon_button, 0)
         icon_row.addWidget(clear_button, 0)
         icon_row.addWidget(icon_info, 1)
@@ -438,7 +508,9 @@ class MainWindow(QWidget):
             self.icon_label.setPixmap(
                 pm.scaled(self.icon_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             )
+            self._reposition_icon()
             self.icon_label.setVisible(True)
+            self.icon_label.raise_()
         else:
             self.icon_label.setPixmap(QPixmap())
             self.icon_label.setVisible(False)
