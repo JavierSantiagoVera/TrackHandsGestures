@@ -138,17 +138,27 @@ class HandWorker(QThread):
     def _open_camera_best_effort(self):
         backends = [("DSHOW", cv2.CAP_DSHOW), ("MSMF", cv2.CAP_MSMF), ("DEFAULT", 0)]
         indices = [self.camera_index] + [i for i in range(4) if i != self.camera_index]
+        # Resoluciones a intentar en orden; si la cámara no soporta la primera, pasa a la siguiente
+        resolutions = [(1280, 720), (960, 540), (640, 480)]
         for idx in indices:
             for name, api in backends:
                 cap = cv2.VideoCapture(idx, api) if api != 0 else cv2.VideoCapture(idx)
-                if cap is None:
+                if cap is None or not cap.isOpened():
+                    if cap:
+                        cap.release()
                     continue
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-                if cap.isOpened():
-                    return cap, idx, name
+                cap.set(cv2.CAP_PROP_FPS, 30)
+                # Intenta resoluciones hasta obtener una válida
+                for rw, rh in resolutions:
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, rw)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, rh)
+                    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    if actual_w > 0 and actual_h > 0:
+                        actual_fps = cap.get(cv2.CAP_PROP_FPS) or 30
+                        return cap, idx, name, actual_w, actual_h, actual_fps
                 cap.release()
-        return None, None, None
+        return None, None, None, 0, 0, 0
 
     # ---------------- MAIN LOOP ----------------
 
@@ -172,7 +182,7 @@ class HandWorker(QThread):
         else:
             self.status.emit("⚠️ No encontré checkpoint (pred sin entrenar). Abriendo cámara...")
 
-        cap, used_idx, used_backend = self._open_camera_best_effort()
+        cap, used_idx, used_backend, actual_w, actual_h, actual_fps = self._open_camera_best_effort()
         if cap is None:
             self.status.emit(
                 "No pude abrir la cámara.\n"
@@ -182,7 +192,10 @@ class HandWorker(QThread):
             self._running = False
             return
 
-        self.status.emit(f"Cámara OK (idx={used_idx}, backend={used_backend})")
+        self.status.emit(
+            f"Cámara OK (idx={used_idx}, backend={used_backend}, "
+            f"{actual_w}×{actual_h} @{actual_fps:.0f}fps)"
+        )
         t0 = time.perf_counter()
 
         while self._running:
