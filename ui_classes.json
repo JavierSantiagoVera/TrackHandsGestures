@@ -1,14 +1,14 @@
 [
   {
-    "name": "Feliz",
-    "icon": "C:/Users/jsvr1/Downloads/Foto_yo_2.jpg"
-  },
-  {
-    "name": "Ira",
+    "name": "gesto 1",
     "icon": ""
   },
   {
-    "name": "Tristeza",
+    "name": "gesto 2",
+    "icon": ""
+  },
+  {
+    "name": "gesto 3",
     "icon": ""
   }
 ]

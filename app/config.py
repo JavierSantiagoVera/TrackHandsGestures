@@ -4,7 +4,8 @@ import json
 
 MODEL_TASK_PATH = "hand_landmarker.task"
 LSTM_CKPT_PATH = "lstm_3gestures.pt"
-DATASET_PATH = "dataset_lsc_3gestos.npz"
+DATASET_PATH = "dataset_lsc_3gestos.npz"       # legacy unencrypted path (kept for reference)
+DATASET_ENC_PATH = "dataset_lsc_3gestos.enc"   # AES-encrypted dataset
 
 MAX_CONSEC_LOST = 999999
 MIN_VALID_FRAMES = 5
@@ -18,9 +19,9 @@ DRAW_EVERY = 1          # cada cuántos frames dibuja
 UI_CFG_PATH = "ui_classes.json"
 
 DEFAULT_CLASSES = [
-    {"name": "LSC_G1", "icon": ""},  # icon: ruta opcional (png/jpg)
-    {"name": "LSC_G2", "icon": ""},
-    {"name": "LSC_G3", "icon": ""},
+    {"name": "gesto 1", "icon": ""},
+    {"name": "gesto 2", "icon": ""},
+    {"name": "gesto 3", "icon": ""},
 ]
 
 def load_ui_classes():
@@ -58,4 +59,4 @@ TRAIN_PATIENCE = 6           # early stopping
 PREDICT_EVERY = 15           # eval cada ~0.5s si tu cam va ~30fps (ajusta)
 HOLD_SECONDS = 2.0           # mantener predicción 2s
 FPS_EST = 30                 # estimado (solo para hold)
-CONF_THRESH = 0.60
+CONF_THRESH = 0.75

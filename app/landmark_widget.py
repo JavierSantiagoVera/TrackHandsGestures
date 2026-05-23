@@ -1,9 +1,15 @@
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
-from PySide6.QtGui import QPainter, QPen, QBrush
+from PySide6.QtGui import QPainter, QPen, QBrush, QColor
 from PySide6.QtWidgets import QWidget
 import mediapipe as mp
 
 mp_hands = mp.tasks.vision.HandLandmarksConnections
+
+_C_NODE_ON   = QColor("#6366F1")   # indigo accent
+_C_NODE_OFF  = QColor("#334155")   # dark slate
+_C_LINE_ON   = QColor("#94A3B8")   # light slate
+_C_LINE_OFF  = QColor("#1E293B")   # barely visible
+
 
 def _normalize_connections(connections):
     out = []
@@ -26,7 +32,9 @@ def _normalize_connections(connections):
         out.append((int(a), int(b)))
     return out
 
+
 CONNS = _normalize_connections(mp_hands.HAND_CONNECTIONS)
+
 
 class LandmarkToggleWidget(QWidget):
     mask_changed = Signal(object)  # list[bool]
@@ -34,10 +42,9 @@ class LandmarkToggleWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.enabled = [True] * 21
-        self.setMinimumWidth(280)
-        self.setMinimumHeight(280)
+        self.setMinimumWidth(180)
+        self.setMinimumHeight(180)
 
-        # Esquema mano (mejor proporcionado)
         self.pos = [
             (0.50, 0.88),
             (0.40, 0.78), (0.33, 0.70), (0.28, 0.62), (0.25, 0.54),
@@ -51,11 +58,11 @@ class LandmarkToggleWidget(QWidget):
         return list(self.enabled)
 
     def _content_rect(self) -> QRectF:
-        m = 18
+        m = 12
         r = self.rect().adjusted(m, m, -m, -m)
         side = min(r.width(), r.height())
         c = r.center()
-        return QRectF(c.x() - side/2, c.y() - side/2, side, side)
+        return QRectF(c.x() - side / 2, c.y() - side / 2, side, side)
 
     def _to_screen(self, i) -> QPointF:
         x, y = self.pos[i]
@@ -66,29 +73,26 @@ class LandmarkToggleWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         try:
-            # fondo default (no pintamos negro)
-
-            # conexiones
             for a, b in CONNS:
                 pa = self._to_screen(a)
                 pb = self._to_screen(b)
                 both_on = self.enabled[a] and self.enabled[b]
-                pen = QPen(Qt.black if both_on else Qt.gray, 2 if both_on else 1)
+                pen = QPen(_C_LINE_ON if both_on else _C_LINE_OFF,
+                           2 if both_on else 1)
                 pen.setCapStyle(Qt.RoundCap)
                 p.setPen(pen)
                 p.drawLine(pa, pb)
 
-            # puntos
             for i in range(21):
                 pt = self._to_screen(i)
                 if self.enabled[i]:
-                    p.setPen(QPen(Qt.black, 2))
-                    p.setBrush(QBrush(Qt.black))
+                    p.setPen(QPen(_C_NODE_ON.darker(120), 1))
+                    p.setBrush(QBrush(_C_NODE_ON))
                     r = 7
                 else:
-                    p.setPen(QPen(Qt.gray, 2))
-                    p.setBrush(QBrush(Qt.gray))
-                    r = 6
+                    p.setPen(QPen(_C_NODE_OFF, 1))
+                    p.setBrush(QBrush(_C_NODE_OFF))
+                    r = 5
                 p.drawEllipse(pt, r, r)
         finally:
             p.end()
@@ -96,21 +100,14 @@ class LandmarkToggleWidget(QWidget):
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton:
             return
-
         click = event.position()
-        best_i = None
-        best_d2 = 1e18
-
+        best_i, best_d2 = None, 1e18
         for i in range(21):
             pt = self._to_screen(i)
-            dx = pt.x() - click.x()
-            dy = pt.y() - click.y()
-            d2 = dx*dx + dy*dy
+            d2 = (pt.x() - click.x()) ** 2 + (pt.y() - click.y()) ** 2
             if d2 < best_d2:
-                best_d2 = d2
-                best_i = i
-
-        if best_i is not None and best_d2 <= (18 * 18):
+                best_d2, best_i = d2, i
+        if best_i is not None and best_d2 <= 18 ** 2:
             self.enabled[best_i] = not self.enabled[best_i]
             self.update()
             self.mask_changed.emit(self.get_mask())
