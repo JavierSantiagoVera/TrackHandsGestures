@@ -1,4 +1,3 @@
-# app/train_worker.py
 import numpy as np
 import torch
 import torch.nn as nn
@@ -8,25 +7,35 @@ from PySide6.QtCore import QThread, Signal
 from . import config as cfg
 from .model import TemporalCNN
 
-class _NpzSeqDataset(Dataset):
-    def __init__(self, npz_path: str, seq_len: int, fdim: int):
-        d = np.load(npz_path, allow_pickle=False)
-        self.X = d["X"].astype(np.float32)  # (N,T,F)
-        self.y = d["y"].astype(np.int64)    # (N,)
-        if self.X.shape[1:] != (seq_len, fdim):
-            raise ValueError(f"NPZ X tiene {self.X.shape}, esperado (*,{seq_len},{fdim}).")
+
+class _ArrayDataset(Dataset):
+    def __init__(self, X: np.ndarray, y: np.ndarray, seq_len: int, fdim: int):
+        if X.shape[1:] != (seq_len, fdim):
+            raise ValueError(
+                f"X shape {X.shape}, esperado (*,{seq_len},{fdim})."
+            )
+        self.X = X
+        self.y = y
 
     def __len__(self): return len(self.y)
-    def __getitem__(self, i):
-        return self.X[i], self.y[i]
+    def __getitem__(self, i): return self.X[i], self.y[i]
+
 
 class TrainWorker(QThread):
     status = Signal(str)
     done = Signal(bool, str)
 
-    def __init__(self, npz_path: str, ckpt_path: str, num_classes: int = 3, parent=None):
+    def __init__(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        ckpt_path: str,
+        num_classes: int = 3,
+        parent=None,
+    ):
         super().__init__(parent)
-        self.npz_path = npz_path
+        self.X = X.astype(np.float32)
+        self.y = y.astype(np.int64)
         self.ckpt_path = ckpt_path
         self.num_classes = int(num_classes)
 
@@ -35,7 +44,7 @@ class TrainWorker(QThread):
             seq_len = int(getattr(cfg, "SEQ_LEN", 30))
             fdim = int(getattr(cfg, "FEATURE_DIM", 64))
 
-            ds = _NpzSeqDataset(self.npz_path, seq_len=seq_len, fdim=fdim)
+            ds = _ArrayDataset(self.X, self.y, seq_len=seq_len, fdim=fdim)
             if len(ds) < 1:
                 self.done.emit(False, f"Dataset vacío (N={len(ds)}). Graba al menos una muestra.")
                 return
@@ -49,9 +58,11 @@ class TrainWorker(QThread):
             dl = DataLoader(ds, batch_size=batch, shuffle=True, num_workers=0)
 
             device = torch.device("cpu")
-            torch.set_num_threads(1)  # sube a 2–4 si quieres más velocidad, depende tu CPU
+            torch.set_num_threads(1)
 
-            model = TemporalCNN(feature_dim=fdim, num_classes=self.num_classes, hidden=48, dropout=0.15).to(device)
+            model = TemporalCNN(
+                feature_dim=fdim, num_classes=self.num_classes, hidden=48, dropout=0.15
+            ).to(device)
             opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
             crit = nn.CrossEntropyLoss()
 
@@ -59,17 +70,16 @@ class TrainWorker(QThread):
             best_state = None
             bad = 0
 
-            self.status.emit(f"Entrenando CNN temporal en CPU... N={len(ds)} | batch={batch} | T={seq_len} | F={fdim}")
+            self.status.emit(
+                f"Entrenando… N={len(ds)} | batch={batch} | T={seq_len} | F={fdim}"
+            )
 
             model.train()
             for ep in range(epochs):
                 loss_sum, total, correct = 0.0, 0, 0
 
                 for X, y in dl:
-                    X = torch.from_numpy(X.numpy()) if hasattr(X, "numpy") else X
-                    X = X.to(device)
-                    y = y.to(device)
-
+                    X, y = X.to(device), y.to(device)
                     opt.zero_grad(set_to_none=True)
                     logits = model(X)
                     loss = crit(logits, y)
@@ -83,12 +93,15 @@ class TrainWorker(QThread):
 
                 avg_loss = loss_sum / max(1, total)
                 acc = correct / max(1, total)
-                self.status.emit(f"Epoch {ep+1}/{epochs} | loss={avg_loss:.4f} acc={acc:.3f}")
+                self.status.emit(
+                    f"Epoch {ep+1}/{epochs} | loss={avg_loss:.4f} acc={acc:.3f}"
+                )
 
-                # early stopping por loss de train (simple y rápido)
                 if avg_loss + 1e-5 < best_loss:
                     best_loss = avg_loss
-                    best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                    best_state = {
+                        k: v.detach().cpu().clone() for k, v in model.state_dict().items()
+                    }
                     bad = 0
                 else:
                     bad += 1
