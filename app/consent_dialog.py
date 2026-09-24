@@ -7,7 +7,10 @@ from PySide6.QtWidgets import (
     QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
 )
 
+from cryptography.fernet import InvalidToken
+
 from . import config as cfg
+from .crypto_store import load_encrypted
 
 
 class ConsentDialog(QDialog):
@@ -148,7 +151,7 @@ class ConsentDialog(QDialog):
         if os.path.exists(enc):
             try:
                 load_encrypted(enc, pwd)
-            except Exception:
+            except InvalidToken:
                 QMessageBox.warning(
                     self,
                     "Contraseña incorrecta",
@@ -156,6 +159,14 @@ class ConsentDialog(QDialog):
                     "• Si recuerdas la contraseña, ingrésala de nuevo.\n"
                     "• Si la olvidaste, usa el botón «🗑 Borrar todo» para\n"
                     "  eliminar los datos y empezar con una contraseña nueva.",
+                )
+                return
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "Dataset dañado",
+                    f"No se pudo leer el dataset guardado:\n{e}\n\n"
+                    "Usa «🗑 Borrar todo» para empezar de nuevo.",
                 )
                 return
         self._password = pwd

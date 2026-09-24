@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+
+# Datos de participantes y modelos entrenados con ellos: nunca al repo
+*.enc
+*.enc.tmp
+*.npz
+*.pt

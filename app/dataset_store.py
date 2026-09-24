@@ -41,6 +41,8 @@ class DatasetStore:
         self.y.append(int(label))
 
     def save(self):
+        if self._load_error:
+            raise ValueError("El dataset existente no se pudo cargar; no se sobrescribe.")
         if len(self.y) == 0:
             raise ValueError("Dataset vacío.")
         X = np.stack(self.X, axis=0).astype(np.float32)

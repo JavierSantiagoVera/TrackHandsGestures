@@ -4,7 +4,6 @@ import json
 
 MODEL_TASK_PATH = "hand_landmarker.task"
 LSTM_CKPT_PATH = "lstm_3gestures.pt"
-DATASET_PATH = "dataset_lsc_3gestos.npz"       # legacy unencrypted path (kept for reference)
 DATASET_ENC_PATH = "dataset_lsc_3gestos.enc"   # AES-encrypted dataset
 
 MAX_CONSEC_LOST = 999999

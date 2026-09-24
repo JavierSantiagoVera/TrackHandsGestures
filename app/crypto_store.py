@@ -31,8 +31,10 @@ def save_encrypted(path: str, X: np.ndarray, y: np.ndarray, password: str) -> No
     np.savez_compressed(buf, X=X, y=y)
     encrypted = f.encrypt(buf.getvalue())
 
-    with open(path, "wb") as fp:
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as fp:
         fp.write(salt + encrypted)
+    os.replace(tmp, path)
 
 
 def load_encrypted(path: str, password: str):

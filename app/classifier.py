@@ -81,7 +81,7 @@ class RealtimeClassifier:
             return False
 
         try:
-            state = torch.load(path, map_location=self.device)
+            state = torch.load(path, map_location=self.device, weights_only=True)
             sd = state["model"] if isinstance(state, dict) and "model" in state else state
             self.model.load_state_dict(sd, strict=True)
             self.loaded = True
