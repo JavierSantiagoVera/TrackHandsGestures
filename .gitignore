@@ -6,3 +6,7 @@ __pycache__/
 *.enc.tmp
 *.npz
 *.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
