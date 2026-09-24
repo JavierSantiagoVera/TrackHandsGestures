@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 _SALT_SIZE = 16
 _ITERATIONS = 390_000
+_VERIFIER_PHRASE = b"cho kawaii gyaru"
 
 
 def _derive_key(password: str, salt: bytes) -> bytes:
@@ -21,6 +22,31 @@ def _derive_key(password: str, salt: bytes) -> bytes:
     return base64.urlsafe_b64encode(kdf.derive(password.encode("utf-8")))
 
 
+def _write_atomic(path: str, data: bytes) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as fp:
+        fp.write(data)
+    os.replace(tmp, path)
+
+
+def create_verifier(path: str, password: str) -> None:
+    """Store the known phrase encrypted with the password."""
+    salt = os.urandom(_SALT_SIZE)
+    token = Fernet(_derive_key(password, salt)).encrypt(_VERIFIER_PHRASE)
+    _write_atomic(path, salt + token)
+
+
+def check_verifier(path: str, password: str) -> bool:
+    """True if the password decrypts the verifier back to the known phrase."""
+    with open(path, "rb") as fp:
+        raw = fp.read()
+    salt, token = raw[:_SALT_SIZE], raw[_SALT_SIZE:]
+    try:
+        return Fernet(_derive_key(password, salt)).decrypt(token) == _VERIFIER_PHRASE
+    except InvalidToken:
+        return False
+
+
 def save_encrypted(path: str, X: np.ndarray, y: np.ndarray, password: str) -> None:
     """Compress numpy arrays and write AES-encrypted to path."""
     salt = os.urandom(_SALT_SIZE)
@@ -31,10 +57,7 @@ def save_encrypted(path: str, X: np.ndarray, y: np.ndarray, password: str) -> No
     np.savez_compressed(buf, X=X, y=y)
     encrypted = f.encrypt(buf.getvalue())
 
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as fp:
-        fp.write(salt + encrypted)
-    os.replace(tmp, path)
+    _write_atomic(path, salt + encrypted)
 
 
 def load_encrypted(path: str, password: str):

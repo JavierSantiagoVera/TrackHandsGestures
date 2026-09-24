@@ -3,14 +3,17 @@ import os
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
+    QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel, QWidget,
     QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
 )
 
 from cryptography.fernet import InvalidToken
 
 from . import config as cfg
-from .crypto_store import load_encrypted
+from .crypto_store import check_verifier, create_verifier, load_encrypted
+
+
+PWD_MIN, PWD_MAX = 4, 32
 
 
 class ConsentDialog(QDialog):
@@ -68,43 +71,34 @@ class ConsentDialog(QDialog):
         layout.addWidget(self.check)
 
         # ── Password ───────────────────────────────────────────
-        _has_dataset = os.path.exists(cfg.DATASET_ENC_PATH)
-
         pwd_row = QHBoxLayout()
         pwd_lbl = QLabel("Contraseña del docente:")
         pwd_lbl.setFixedWidth(200)
         self.pwd_edit = QLineEdit()
         self.pwd_edit.setEchoMode(QLineEdit.Password)
-        self.pwd_edit.setPlaceholderText("Mínimo 4 caracteres")
+        self.pwd_edit.setMaxLength(PWD_MAX)
+        self.pwd_edit.setPlaceholderText(f"Entre {PWD_MIN} y {PWD_MAX} caracteres")
         pwd_row.addWidget(pwd_lbl)
         pwd_row.addWidget(self.pwd_edit, 1)
         layout.addLayout(pwd_row)
 
-        if _has_dataset:
-            self.confirm_edit = None
-            hint = QLabel(
-                "⚠️  Ya existe un dataset de esta sesión. "
-                "Ingresa la misma contraseña para continuar."
-            )
-            hint.setWordWrap(True)
-            hint.setStyleSheet("color: #F59E0B; font-size: 12px;")
-            layout.addWidget(hint)
-        else:
-            confirm_row = QHBoxLayout()
-            confirm_lbl = QLabel("Confirmar contraseña:")
-            confirm_lbl.setFixedWidth(200)
-            self.confirm_edit = QLineEdit()
-            self.confirm_edit.setEchoMode(QLineEdit.Password)
-            self.confirm_edit.setPlaceholderText("Repite la contraseña")
-            confirm_row.addWidget(confirm_lbl)
-            confirm_row.addWidget(self.confirm_edit, 1)
-            layout.addLayout(confirm_row)
-            new_hint = QLabel(
-                "🔑  Nueva sesión: elige una contraseña para proteger los datos."
-            )
-            new_hint.setWordWrap(True)
-            new_hint.setStyleSheet("color: #34D399; font-size: 12px;")
-            layout.addWidget(new_hint)
+        # Confirm row: only shown when a new password is being created
+        self.confirm_row = QWidget()
+        confirm_layout = QHBoxLayout(self.confirm_row)
+        confirm_layout.setContentsMargins(0, 0, 0, 0)
+        confirm_lbl = QLabel("Confirmar contraseña:")
+        confirm_lbl.setFixedWidth(200)
+        self.confirm_edit = QLineEdit()
+        self.confirm_edit.setEchoMode(QLineEdit.Password)
+        self.confirm_edit.setMaxLength(PWD_MAX)
+        self.confirm_edit.setPlaceholderText("Repite la contraseña")
+        confirm_layout.addWidget(confirm_lbl)
+        confirm_layout.addWidget(self.confirm_edit, 1)
+        layout.addWidget(self.confirm_row)
+
+        self.mode_hint = QLabel()
+        self.mode_hint.setWordWrap(True)
+        layout.addWidget(self.mode_hint)
 
         # ── Buttons ────────────────────────────────────────────
         btn_row = QHBoxLayout()
@@ -128,38 +122,71 @@ class ConsentDialog(QDialog):
         # ── Connections ────────────────────────────────────────
         self.check.stateChanged.connect(self._update_btn)
         self.pwd_edit.textChanged.connect(self._update_btn)
-        if self.confirm_edit is not None:
-            self.confirm_edit.textChanged.connect(self._update_btn)
+        self.confirm_edit.textChanged.connect(self._update_btn)
         self.btn_continue.clicked.connect(self._on_continue)
         self.btn_reset.clicked.connect(self._on_reset_all)
+
+        self._refresh_mode()
+
+    # ──────────────────────────────────────────────────────────
+
+    def _refresh_mode(self):
+        """Existing session → ask for the password; otherwise create a new one."""
+        self._new_session = not (
+            os.path.exists(cfg.AUTH_PATH) or os.path.exists(cfg.DATASET_ENC_PATH)
+        )
+        self.confirm_row.setVisible(self._new_session)
+        self.pwd_edit.clear()
+        self.confirm_edit.clear()
+        if self._new_session:
+            self.mode_hint.setText("🔑  Nueva sesión: elige una contraseña para proteger los datos.")
+            self.mode_hint.setStyleSheet("color: #34D399; font-size: 12px;")
+        else:
+            self.mode_hint.setText(
+                "⚠️  Ya existe un dataset de esta sesión. "
+                "Ingresa la misma contraseña para continuar."
+            )
+            self.mode_hint.setStyleSheet("color: #F59E0B; font-size: 12px;")
+        self._update_btn()
+        self.adjustSize()
 
     # ──────────────────────────────────────────────────────────
 
     def _update_btn(self):
         pwd = self.pwd_edit.text()
-        ok = self.check.isChecked() and len(pwd.strip()) >= 4
-        if ok and self.confirm_edit is not None:
-            ok = pwd == self.confirm_edit.text() and len(self.confirm_edit.text().strip()) >= 4
+        ok = self.check.isChecked() and len(pwd.strip()) >= PWD_MIN
+        if ok and self._new_session:
+            ok = pwd == self.confirm_edit.text() and len(self.confirm_edit.text().strip()) >= PWD_MIN
         self.btn_continue.setEnabled(ok)
 
     def _on_continue(self):
         pwd = self.pwd_edit.text().strip()
-        if self.confirm_edit is not None and self.pwd_edit.text() != self.confirm_edit.text():
+        if self._new_session and self.pwd_edit.text() != self.confirm_edit.text():
             QMessageBox.warning(self, "Contraseña", "Las contraseñas no coinciden.")
             return
         enc = cfg.DATASET_ENC_PATH
-        if os.path.exists(enc):
+        wrong_pwd_msg = (
+            "La contraseña no coincide con los datos guardados.\n\n"
+            "• Si recuerdas la contraseña, ingrésala de nuevo.\n"
+            "• Si la olvidaste, usa el botón «🗑 Borrar todo» para\n"
+            "  eliminar los datos y empezar con una contraseña nueva."
+        )
+        if os.path.exists(cfg.AUTH_PATH):
+            try:
+                ok = check_verifier(cfg.AUTH_PATH, pwd)
+            except Exception as e:
+                QMessageBox.warning(self, "Verificador dañado",
+                                    f"No se pudo leer {cfg.AUTH_PATH}:\n{e}")
+                return
+            if not ok:
+                QMessageBox.warning(self, "Contraseña incorrecta", wrong_pwd_msg)
+                return
+        elif os.path.exists(enc):
+            # Dataset from before the verifier existed: check by decrypting it
             try:
                 load_encrypted(enc, pwd)
             except InvalidToken:
-                QMessageBox.warning(
-                    self,
-                    "Contraseña incorrecta",
-                    "La contraseña no coincide con el dataset guardado.\n\n"
-                    "• Si recuerdas la contraseña, ingrésala de nuevo.\n"
-                    "• Si la olvidaste, usa el botón «🗑 Borrar todo» para\n"
-                    "  eliminar los datos y empezar con una contraseña nueva.",
-                )
+                QMessageBox.warning(self, "Contraseña incorrecta", wrong_pwd_msg)
                 return
             except Exception as e:
                 QMessageBox.warning(
@@ -169,13 +196,20 @@ class ConsentDialog(QDialog):
                     "Usa «🗑 Borrar todo» para empezar de nuevo.",
                 )
                 return
+
+        if not os.path.exists(cfg.AUTH_PATH):
+            try:
+                create_verifier(cfg.AUTH_PATH, pwd)
+            except Exception as e:
+                QMessageBox.warning(self, "Contraseña", f"No se pudo guardar la contraseña:\n{e}")
+                return
         self._password = pwd
         self.accept()
 
     def _on_reset_all(self):
         enc = cfg.DATASET_ENC_PATH
 
-        has_data = os.path.exists(enc) or os.path.exists(cfg.LSTM_CKPT_PATH)
+        has_data = any(os.path.exists(p) for p in (enc, cfg.LSTM_CKPT_PATH, cfg.AUTH_PATH))
         if not has_data:
             QMessageBox.information(self, "Sin datos", "No hay datos guardados para borrar.")
             return
@@ -192,7 +226,7 @@ class ConsentDialog(QDialog):
         if reply != QMessageBox.Yes:
             return
 
-        for path in (enc, cfg.LSTM_CKPT_PATH):
+        for path in (enc, cfg.LSTM_CKPT_PATH, cfg.AUTH_PATH):
             if os.path.exists(path):
                 os.remove(path)
 
@@ -202,6 +236,7 @@ class ConsentDialog(QDialog):
             "Datos borrados correctamente.\n"
             "Puedes comenzar una nueva sesión con una contraseña nueva.",
         )
+        self._refresh_mode()
 
     def password(self) -> str:
         return self._password

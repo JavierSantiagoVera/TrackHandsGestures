@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, Slot, QMetaObject, Q_ARG, QTimer, QEvent
 from PySide6.QtGui import QFont, QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QSizePolicy,
+    QMessageBox, QPushButton, QScrollArea, QSizePolicy,
     QVBoxLayout, QWidget, QFrame,
 )
 
@@ -33,8 +33,8 @@ class MainWindow(QWidget):
         self._scale = min(sw / 1920.0, sh / 1080.0)
         s = self._scale
 
-        right_w  = max(220, int(sw * 0.20))
-        lm_size  = max(160, int(sh * 0.22))
+        right_w  = self._right_width(sw)
+        lm_size  = self._landmarks_size(right_w, sh)
         icon_sz  = max(80,  int(sh * 0.13))
 
         # ── Dataset ────────────────────────────────────────────
@@ -74,7 +74,6 @@ class MainWindow(QWidget):
 
         # ── Right panel ────────────────────────────────────────
         self.landmarks_view = LandmarkToggleWidget()
-        self.landmarks_view.setFixedWidth(right_w - 20)
         self.landmarks_view.setFixedHeight(lm_size)
 
         # Prediction display
@@ -130,6 +129,14 @@ class MainWindow(QWidget):
         self.btn_cancel.setObjectName("btn_cancel")
         self.btn_cancel.setEnabled(False)
 
+        self.undo_btns = []
+        for i in range(3):
+            b = QPushButton("↶")
+            b.setObjectName("btn_cancel")
+            b.clicked.connect(lambda _, i=i: self.undo_last_sample(i))
+            self.undo_btns.append(b)
+        self._update_undo_tooltips()
+
         self.btn_reset_ds = QPushButton("🗑  Resetear dataset")
         self.btn_reset_ds.setObjectName("btn_danger")
 
@@ -138,7 +145,7 @@ class MainWindow(QWidget):
 
         for btn in (
             self.btn_add0, self.btn_add1, self.btn_add2,
-            self.btn_cancel, self.btn_reset_ds, self.btn_train,
+            self.btn_cancel, self.btn_reset_ds, self.btn_train, *self.undo_btns,
         ):
             btn.setMinimumHeight(btn_h)
 
@@ -152,7 +159,7 @@ class MainWindow(QWidget):
         self.lm_title.setAlignment(Qt.AlignCenter)
         self.lm_title.setStyleSheet("color: #64748B; font-size: 11px; font-weight: bold; letter-spacing: 1px;")
         right.addWidget(self.lm_title)
-        right.addWidget(self.landmarks_view, 0, Qt.AlignHCenter)
+        right.addWidget(self.landmarks_view)
 
         # Separator
         sep1 = QFrame(); sep1.setFrameShape(QFrame.HLine)
@@ -184,21 +191,44 @@ class MainWindow(QWidget):
         right.addWidget(sep3)
 
         # Record buttons
-        right.addWidget(self.btn_add0)
-        right.addWidget(self.btn_add1)
-        right.addWidget(self.btn_add2)
+        for add_btn, undo_btn in zip((self.btn_add0, self.btn_add1, self.btn_add2), self.undo_btns):
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            row.addWidget(add_btn, 1)
+            row.addWidget(undo_btn)
+            right.addLayout(row)
         right.addWidget(self.btn_cancel)
         right.addWidget(self.btn_reset_ds)
 
-        # Separator
-        sep4 = QFrame(); sep4.setFrameShape(QFrame.HLine)
-        right.addWidget(sep4)
+        right.addStretch(1)
 
-        right.addWidget(self.btn_train)
-        right.addWidget(self.status, 1)
+        # Scrollable content: with 125%/150% display scaling the panel can be
+        # taller than the window, so it scrolls instead of being cut off.
+        right_content = QWidget()
+        right_content.setLayout(right)
+        right_scroll = QScrollArea()
+        right_scroll.setWidget(right_content)
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.NoFrame)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # Train button + status stay pinned at the bottom, always visible
+        footer = QVBoxLayout()
+        footer.setSpacing(6)
+        footer.setContentsMargins(8, 6, 8, 10)
+        sep_footer = QFrame(); sep_footer.setFrameShape(QFrame.HLine)
+        footer.addWidget(sep_footer)
+        footer.addWidget(self.btn_train)
+        footer.addWidget(self.status)
+
+        panel_layout = QVBoxLayout()
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(0)
+        panel_layout.addWidget(right_scroll, 1)
+        panel_layout.addLayout(footer)
 
         self.right_panel = QWidget()
-        self.right_panel.setLayout(right)
+        self.right_panel.setLayout(panel_layout)
         self.right_panel.setFixedWidth(right_w)
         self.right_panel.setStyleSheet("background-color: #0B1120; border-left: 1px solid #1E293B;")
 
@@ -231,9 +261,21 @@ class MainWindow(QWidget):
         self.btn_train.clicked.connect(self.train_model)
 
         self.worker.start()
+        if len(self.ds) == 0 and not self.ds._load_error:
+            self._reset_class_names()
         self._push_class_names_to_worker()
 
     # ── Responsive scaling ─────────────────────────────────────
+
+    @staticmethod
+    def _right_width(W: int) -> int:
+        # Logical px: a 1080p laptop at 150% reports only 1280 px wide
+        return min(420, max(270, int(W * 0.22)))
+
+    @staticmethod
+    def _landmarks_size(right_w: int, H: int) -> int:
+        # Square-ish and never too small to click individual joints
+        return max(220, min(right_w - 30, int(H * 0.34)))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -246,13 +288,12 @@ class MainWindow(QWidget):
             return
         s = min(W / 1280.0, H / 720.0)
 
-        right_w = max(180, int(W * 0.20))
-        lm_size = max(130, int(H * 0.22))
+        right_w = self._right_width(W)
+        lm_size = self._landmarks_size(right_w, H)
         icon_sz = max(80,  int(H * 0.13))
         btn_h   = max(24,  int(34 * s))
 
         self.right_panel.setFixedWidth(right_w)
-        self.landmarks_view.setFixedWidth(right_w - 20)
         self.landmarks_view.setFixedHeight(lm_size)
         self.icon_label.setFixedSize(icon_sz, icon_sz)
 
@@ -278,8 +319,10 @@ class MainWindow(QWidget):
         )
 
         for btn in (self.btn_add0, self.btn_add1, self.btn_add2,
-                    self.btn_cancel, self.btn_reset_ds, self.btn_train):
+                    self.btn_cancel, self.btn_reset_ds, self.btn_train, *self.undo_btns):
             btn.setMinimumHeight(btn_h)
+        for btn in self.undo_btns:
+            btn.setFixedWidth(max(36, int(44 * s)))
 
         for ctrl in self.class_controls:
             ctrl["icon_label"].setStyleSheet(f"font-size: {xs}px; color: #475569;")
@@ -335,8 +378,45 @@ class MainWindow(QWidget):
         self.ds.y = []
         if os.path.exists(DATASET_ENC_PATH):
             os.remove(DATASET_ENC_PATH)
-        self.counts_label.setText(self._counts_text())
+        self._reset_class_names()
         self.status.setText("Dataset reseteado.")
+
+    def undo_last_sample(self, label: int):
+        name = self.class_names[label]
+        if label not in self.ds.y:
+            self.status.setText(f"No hay muestras de {name} para borrar.")
+            return
+        reply = QMessageBox.question(
+            self,
+            "Borrar última muestra",
+            f"¿Borrar la última muestra grabada de {name}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            self.ds.pop_last(label)
+        except Exception as e:
+            QMessageBox.warning(self, "Dataset", f"No pude borrar la muestra: {e}")
+            return
+        self.status.setText(f"Última muestra de {name} borrada.")
+        if len(self.ds) == 0:
+            self._reset_class_names()
+        else:
+            self.counts_label.setText(self._counts_text())
+
+    def _reset_class_names(self):
+        """Empty dataset: restore the default gesture names (icons are kept)."""
+        for idx, ctrl in enumerate(self.class_controls):
+            name = self._default_name(idx)
+            self.class_meta[idx]["name"] = name
+            ctrl["name_edit"].setText(name)
+        self._on_class_meta_updated()
+
+    def _update_undo_tooltips(self):
+        for name, btn in zip(self.class_names, self.undo_btns):
+            btn.setToolTip(f"Borrar la última muestra de {name}")
 
     def _counts_text(self) -> str:
         if self.ds._load_error:
@@ -354,6 +434,8 @@ class MainWindow(QWidget):
         self.btn_add0.setEnabled(enabled)
         self.btn_add1.setEnabled(enabled)
         self.btn_add2.setEnabled(enabled)
+        for btn in self.undo_btns:
+            btn.setEnabled(enabled)
 
     # ── Class meta helpers ─────────────────────────────────────
 
@@ -471,6 +553,7 @@ class MainWindow(QWidget):
         self.btn_add0.setText(f"⏺  {self.class_names[0]}  ({SEQ_LEN} f)")
         self.btn_add1.setText(f"⏺  {self.class_names[1]}  ({SEQ_LEN} f)")
         self.btn_add2.setText(f"⏺  {self.class_names[2]}  ({SEQ_LEN} f)")
+        self._update_undo_tooltips()
         self.counts_label.setText(self._counts_text())
         self._push_class_names_to_worker()
         try:

@@ -49,6 +49,20 @@ class DatasetStore:
         y = np.asarray(self.y, dtype=np.int64)
         save_encrypted(self.enc_path, X, y, self._password)
 
+    def pop_last(self, label: int) -> None:
+        """Remove the most recent sample of `label` and persist."""
+        if self._load_error:
+            raise ValueError("El dataset existente no se pudo cargar; no se modifica.")
+        idx = next((i for i in range(len(self.y) - 1, -1, -1) if self.y[i] == label), None)
+        if idx is None:
+            raise ValueError("No hay muestras de esta clase para borrar.")
+        del self.X[idx]
+        del self.y[idx]
+        if self.y:
+            self.save()
+        elif os.path.exists(self.enc_path):
+            os.remove(self.enc_path)
+
     def counts(self, num_classes: int) -> list:
         c = [0] * num_classes
         for yi in self.y:

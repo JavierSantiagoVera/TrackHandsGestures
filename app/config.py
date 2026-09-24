@@ -5,6 +5,7 @@ import json
 MODEL_TASK_PATH = "hand_landmarker.task"
 LSTM_CKPT_PATH = "lstm_3gestures.pt"
 DATASET_ENC_PATH = "dataset_lsc_3gestos.enc"   # AES-encrypted dataset
+AUTH_PATH = "auth.enc"                         # password verifier (encrypted known phrase)
 
 MAX_CONSEC_LOST = 999999
 MIN_VALID_FRAMES = 5

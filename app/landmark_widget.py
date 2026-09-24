@@ -42,8 +42,8 @@ class LandmarkToggleWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.enabled = [True] * 21
-        self.setMinimumWidth(180)
-        self.setMinimumHeight(180)
+        self.setMinimumSize(200, 200)
+        self.setCursor(Qt.PointingHandCursor)
 
         self.pos = [
             (0.50, 0.88),
@@ -57,17 +57,33 @@ class LandmarkToggleWidget(QWidget):
     def get_mask(self):
         return list(self.enabled)
 
+    def _node_radius(self) -> float:
+        # Scale nodes with the drawing so they stay visible on small panels
+        r = self._content_rect()
+        return max(6.0, min(r.width(), r.height()) * 0.032)
+
     def _content_rect(self) -> QRectF:
-        m = 12
+        # Fit the hand's bounding box (not the unit square) into the widget,
+        # keeping aspect ratio, so the joints use all the available space
+        xs = [x for x, _ in self.pos]
+        ys = [y for _, y in self.pos]
+        bw, bh = max(xs) - min(xs), max(ys) - min(ys)
+        m = 16
         r = self.rect().adjusted(m, m, -m, -m)
-        side = min(r.width(), r.height())
+        k = min(r.width() / bw, r.height() / bh)
+        w, h = bw * k, bh * k
         c = r.center()
-        return QRectF(c.x() - side / 2, c.y() - side / 2, side, side)
+        return QRectF(c.x() - w / 2, c.y() - h / 2, w, h)
 
     def _to_screen(self, i) -> QPointF:
+        xs = [x for x, _ in self.pos]
+        ys = [y for _, y in self.pos]
+        x0, y0 = min(xs), min(ys)
+        bw, bh = max(xs) - x0, max(ys) - y0
         x, y = self.pos[i]
         r = self._content_rect()
-        return QPointF(r.left() + x * r.width(), r.top() + y * r.height())
+        return QPointF(r.left() + (x - x0) / bw * r.width(),
+                       r.top() + (y - y0) / bh * r.height())
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -88,11 +104,11 @@ class LandmarkToggleWidget(QWidget):
                 if self.enabled[i]:
                     p.setPen(QPen(_C_NODE_ON.darker(120), 1))
                     p.setBrush(QBrush(_C_NODE_ON))
-                    r = 7
+                    r = self._node_radius()
                 else:
                     p.setPen(QPen(_C_NODE_OFF, 1))
                     p.setBrush(QBrush(_C_NODE_OFF))
-                    r = 5
+                    r = self._node_radius() * 0.75
                 p.drawEllipse(pt, r, r)
         finally:
             p.end()
@@ -107,7 +123,10 @@ class LandmarkToggleWidget(QWidget):
             d2 = (pt.x() - click.x()) ** 2 + (pt.y() - click.y()) ** 2
             if d2 < best_d2:
                 best_d2, best_i = d2, i
-        if best_i is not None and best_d2 <= 18 ** 2:
+        # Nearest joint wins; tolerance grows with the drawing size
+        rect = self._content_rect()
+        hit = max(18.0, min(rect.width(), rect.height()) * 0.08)
+        if best_i is not None and best_d2 <= hit ** 2:
             self.enabled[best_i] = not self.enabled[best_i]
             self.update()
             self.mask_changed.emit(self.get_mask())
