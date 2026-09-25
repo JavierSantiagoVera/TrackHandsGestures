@@ -1,3 +1,5 @@
+# Hoja de estilos (tema oscuro) para toda la app. Los botones se identifican
+# por su objectName (p. ej. "btn_train", "btn_danger") para darles color.
 DARK_QSS = """
 /* ── Base ─────────────────────────────────────────────────────── */
 QWidget {

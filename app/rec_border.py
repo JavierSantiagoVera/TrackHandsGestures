@@ -1,3 +1,8 @@
+"""Marco del video que indica el estado de la grabación.
+
+gris = en espera · ámbar = cuenta regresiva · verde = se llena en sentido
+horario a medida que se graban los frames.
+"""
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget

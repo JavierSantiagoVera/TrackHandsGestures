@@ -1,3 +1,9 @@
+"""Entrenamiento del modelo en un hilo aparte (la interfaz no se congela).
+
+Pasos: arma el dataset → entrena TemporalCNN con AdamW → se queda con la
+época de menor pérdida → guarda los pesos en LSTM_CKPT_PATH.
+Emite `status` con el progreso y `done` al terminar.
+"""
 import numpy as np
 import torch
 import torch.nn as nn
@@ -106,9 +112,11 @@ class TrainWorker(QThread):
                 else:
                     bad += 1
                     if bad >= patience:
+                        # 踊 (Odo): se baila hasta que la loss deja de bajar
                         self.status.emit(f"Early stop: sin mejora en {patience} epochs.")
                         break
 
+            # Se guarda la mejor época, no necesariamente la última
             if best_state is not None:
                 model.load_state_dict(best_state)
 

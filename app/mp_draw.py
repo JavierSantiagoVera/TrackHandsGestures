@@ -1,3 +1,8 @@
+"""Dibuja los puntos de la mano sobre el video.
+
+Los puntos activos se pintan de color; los desactivados en gris, para que se
+vea qué información está usando el modelo.
+"""
 import numpy as np
 import cv2
 import mediapipe as mp

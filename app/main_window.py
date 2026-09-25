@@ -1,3 +1,11 @@
+"""Ventana principal.
+
+A la izquierda el video; a la derecha el panel de control. Conecta todo:
+    - HandWorker (hilo de cámara) → muestra video y predicciones.
+    - Botones de grabar → cuenta regresiva de 3 s → worker graba la muestra
+      → on_sample_ready la guarda en el DatasetStore cifrado.
+    - Entrenar → TrainWorker en segundo plano → el worker recarga el modelo.
+"""
 import os
 
 import numpy as np
@@ -59,7 +67,7 @@ class MainWindow(QWidget):
         self.icon_label.setVisible(False)
         self.icon_label.raise_()
 
-        # Countdown overlay (full-size, centered)
+        # Countdown overlay (full-size, centered) — 🎭 唱: it's showtime!
         self.countdown_overlay = QLabel("", self.rec_border)
         self.countdown_overlay.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.countdown_overlay.setAlignment(Qt.AlignCenter)
@@ -577,6 +585,7 @@ class MainWindow(QWidget):
                 pass
 
     # ── Pre-record countdown ───────────────────────────────────
+    # Da 3 s para poner la mano en posición; al llegar a 0 el worker empieza a grabar.
 
     def _schedule_recording(self, label_idx: int):
         if self.pre_record_timer is not None:
@@ -651,6 +660,7 @@ class MainWindow(QWidget):
             self.worker.cancel_sample()
 
     # ── Worker slots ───────────────────────────────────────────
+    # Reciben las señales del hilo de cámara y actualizan la interfaz.
 
     @Slot(object)
     def on_frame(self, frame_bgr):
@@ -726,6 +736,7 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "Dataset", f"No pude guardar muestra: {e}")
 
     # ── Training ───────────────────────────────────────────────
+    # Se copia el dataset a arrays y se entrena en otro hilo para no congelar la UI.
 
     def train_model(self):
         if self.train_worker is not None and self.train_worker.isRunning():

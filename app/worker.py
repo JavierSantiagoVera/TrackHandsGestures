@@ -1,3 +1,17 @@
+"""Hilo de cámara: el corazón de la app.
+
+En cada frame:
+  1. Lee la cámara y la voltea (efecto espejo).
+  2. MediaPipe detecta los 21 puntos de la mano.
+  3. Convierte los puntos en un vector de características (features.py).
+  4. Si hay modelo entrenado, lo pasa al clasificador en vivo.
+  5. Si se está grabando, acumula el vector hasta completar SEQ_LEN frames
+     y emite la muestra (sample_ready).
+  6. Dibuja los puntos y envía el frame a la interfaz (frame_ready).
+
+Se comunica con la ventana principal solo mediante señales de Qt, porque
+la interfaz no se puede tocar desde otro hilo.
+"""
 import time
 import cv2
 import mediapipe as mp
@@ -28,7 +42,7 @@ class HandWorker(QThread):
 
     # grabación de features
     rec_state = Signal(bool, str)             # (is_recording, msg)
-    sample_ready = Signal(int, object)        # (label:int, seq:(T,126))
+    sample_ready = Signal(int, object)        # (label:int, seq:(SEQ_LEN, FEATURE_DIM))
 
     # NUEVO: contador/progreso
     rec_progress = Signal(int, int)           # (remaining, total)
@@ -66,8 +80,8 @@ class HandWorker(QThread):
         self._rec_mutex = QMutex()
         self._recording = False
         self._rec_label = 0
-        self._rec_buf = []              # list of (126,)
-        self._last_feat = None          # last valid (126,)
+        self._rec_buf = []              # vectores (FEATURE_DIM,) de la muestra en curso
+        self._last_feat = None          # último vector con mano real
         self._consec_lost = 0
         self._valid_frames = 0
 
@@ -136,6 +150,7 @@ class HandWorker(QThread):
     # ---------------- CAMERA ----------------
 
     def _open_camera_best_effort(self):
+        # Prueba varias cámaras, backends de Windows y resoluciones hasta que una funcione
         backends = [("DSHOW", cv2.CAP_DSHOW), ("MSMF", cv2.CAP_MSMF), ("DEFAULT", 0)]
         indices = [self.camera_index] + [i for i in range(4) if i != self.camera_index]
         # Resoluciones a intentar en orden; si la cámara no soporta la primera, pasa a la siguiente
@@ -204,6 +219,7 @@ class HandWorker(QThread):
                 self.status.emit("Cámara: no pude leer frame.")
                 break
 
+            # 1. Espejo, para que mover la mano derecha se vea a la derecha
             frame_bgr = cv2.flip(frame_bgr, 1)
 
             # Full-res para UI
@@ -224,16 +240,17 @@ class HandWorker(QThread):
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb_det)
             timestamp_ms = int((time.perf_counter() - t0) * 1000)
 
+            # 2. Detección de la mano (el timestamp debe crecer siempre)
             result = detector.detect_for_video(mp_image, timestamp_ms)
             has_hand = bool(result and getattr(result, "hand_landmarks", None) and len(result.hand_landmarks) > 0)
 
             # máscara UNA vez
             mask = self._get_mask_copy()
 
-            # Feature enmascarado (para LSTM y grabación)
+            # 3. Vector de características (los puntos desactivados valen 0)
             feat_now = result_to_feature(result, enabled_mask=mask, target_dim=self.fdim)  # (F,)
 
-            # --- Clasificación en vivo optimizada
+            # 4. Clasificación en vivo (solo cada PREDICT_EVERY frames, para ahorrar CPU)
             if has_hand:
                 self.classifier.push(feat_now)
                 self._frame_count += 1
@@ -252,7 +269,7 @@ class HandWorker(QThread):
                 self.classifier.reset()
                 self.pred_ready.emit("sin prediccion", 0.0, None)
 
-            # --- Grabación (contador incluido)
+            # 5. Grabación: si se pierde la mano, repite el último vector válido
             with QMutexLocker(self._rec_mutex):
                 if self._recording:
                     if has_hand:
@@ -288,7 +305,7 @@ class HandWorker(QThread):
                         self.rec_progress.emit(remaining, self.seq_len)
 
                         if len(self._rec_buf) >= self.seq_len:
-                            seq = np.stack(self._rec_buf[: self.seq_len], axis=0)  # (T,126)
+                            seq = np.stack(self._rec_buf[: self.seq_len], axis=0)  # (SEQ_LEN, FEATURE_DIM)
                             ok_keep = (self._valid_frames >= self.min_valid_frames)
 
                             self._recording = False
@@ -306,7 +323,7 @@ class HandWorker(QThread):
                             else:
                                 self.rec_state.emit(False, "⚠️ Muy pocos frames con mano real. Muestra descartada.")
 
-            # --- Dibujo (usa frame full-res para UI; landmarks son normalizados)
+            # 6. Dibujo (usa frame full-res para UI; landmarks son normalizados)
             if result and result.hand_landmarks:
                 annotated_rgb = draw_landmarks_filtered(frame_rgb_full, result, mask)
                 out_bgr = cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)

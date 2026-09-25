@@ -1,3 +1,11 @@
+"""Pantalla de inicio: consentimiento y contraseña.
+
+- Sesión nueva (no hay datos): se pide una contraseña dos veces y se crea el
+  verificador auth.enc.
+- Sesión existente: se comprueba la contraseña contra auth.enc. Sin la
+  contraseña correcta no se entra a la app.
+- "Borrar todo": elimina dataset, verificador y modelo, y vuelve a modo sesión nueva.
+"""
 import os
 
 from PySide6.QtCore import Qt
@@ -56,8 +64,9 @@ class ConsentDialog(QDialog):
             "• Únicamente para esta actividad educativa.<br>"
             "• No se guarda video ni imagen de los participantes.<br>"
             "• No se comparten con terceros ni se conservan después de la sesión.<br>"
-            "• Los datos se guardan <b>cifrados</b>; solo el docente puede acceder con su contraseña.<br>"
-            "• El docente puede borrar toda la información en cualquier momento."
+            "• Los datos se guardan <b>cifrados</b> con una contraseña que elige cada grupo o persona; "
+            "son solo para su propio uso y nadie más puede abrirlos.<br>"
+            "• Quien creó la sesión puede borrar toda su información en cualquier momento."
         )
         info.setWordWrap(True)
         info.setStyleSheet("font-size: 13px; color: #CBD5E1; line-height: 1.6;")
@@ -72,7 +81,7 @@ class ConsentDialog(QDialog):
 
         # ── Password ───────────────────────────────────────────
         pwd_row = QHBoxLayout()
-        pwd_lbl = QLabel("Contraseña del docente:")
+        pwd_lbl = QLabel("Contraseña del grupo:")
         pwd_lbl.setFixedWidth(200)
         self.pwd_edit = QLineEdit()
         self.pwd_edit.setEchoMode(QLineEdit.Password)
@@ -106,7 +115,7 @@ class ConsentDialog(QDialog):
         self.btn_reset = QPushButton("🗑  Borrar todo")
         self.btn_reset.setObjectName("btn_danger")
         self.btn_reset.setToolTip(
-            "Borra el dataset cifrado y el modelo guardados (requiere contraseña)."
+            "Borra el dataset cifrado, la contraseña y el modelo guardados."
         )
 
         self.btn_continue = QPushButton("Continuar  →")
@@ -139,12 +148,12 @@ class ConsentDialog(QDialog):
         self.pwd_edit.clear()
         self.confirm_edit.clear()
         if self._new_session:
-            self.mode_hint.setText("🔑  Nueva sesión: elige una contraseña para proteger los datos.")
+            self.mode_hint.setText("🔑  Nueva sesión: elijan una contraseña para proteger sus datos. Es solo para su grupo; no la compartan.")
             self.mode_hint.setStyleSheet("color: #34D399; font-size: 12px;")
         else:
             self.mode_hint.setText(
-                "⚠️  Ya existe un dataset de esta sesión. "
-                "Ingresa la misma contraseña para continuar."
+                "⚠️  Ya existe una sesión guardada. "
+                "Ingresa la contraseña de tu grupo para continuar."
             )
             self.mode_hint.setStyleSheet("color: #F59E0B; font-size: 12px;")
         self._update_btn()

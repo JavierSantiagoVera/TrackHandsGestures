@@ -1,3 +1,4 @@
+"""Conversión de frames de OpenCV (BGR) a imágenes que Qt puede mostrar."""
 import cv2
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtCore import Qt

@@ -1,4 +1,11 @@
 # app/classifier.py
+"""Predicción en tiempo real.
+
+Guarda los últimos SEQ_LEN vectores en un búfer circular (se sobrescribe el
+más viejo). Cuando está lleno, el modelo evalúa esa ventana y devuelve el
+gesto más probable, solo si supera CONF_THRESH. La última predicción válida
+se mantiene HOLD_SECONDS para que la etiqueta no parpadee.
+"""
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -57,6 +64,7 @@ class RealtimeClassifier:
             out[:n] = f[:n]
             f = out
 
+        # Búfer circular: ptr apunta a la posición más vieja
         self.buf[self.ptr] = f
         self.ptr = (self.ptr + 1) % self.seq_len
         self.filled = min(self.seq_len, self.filled + 1)
@@ -65,6 +73,7 @@ class RealtimeClassifier:
         return self.filled == self.seq_len
 
     def _sequence(self):
+        # Reordena el búfer circular a orden cronológico (más viejo → más nuevo)
         if self.ptr == 0:
             x_np = self.buf
         else:

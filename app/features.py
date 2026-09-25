@@ -1,3 +1,15 @@
+"""De puntos de la mano a un vector de características.
+
+MediaPipe entrega 21 puntos (x, y, z) por mano. En vez de usar las coordenadas
+crudas (que cambian si la mano se mueve o se acerca a la cámara), se calculan
+medidas de FORMA de la mano:
+
+    21 longitudes de conexiones + 15 ángulos + 21 distancias a la muñeca = 57
+    → se rellena con ceros hasta FEATURE_DIM (64).
+
+Las distancias se dividen por el tamaño de la mano, así el gesto se ve igual
+cerca o lejos de la cámara.
+"""
 import numpy as np
 import mediapipe as mp
 

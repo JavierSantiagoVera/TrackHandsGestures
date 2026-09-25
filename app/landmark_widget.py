@@ -1,3 +1,9 @@
+"""Selector de puntos de la mano.
+
+Dibuja una mano esquemática con los 21 puntos de MediaPipe. Al hacer clic en
+uno se activa/desactiva y se emite `mask_changed`: el worker deja de usar ese
+punto para calcular las características.
+"""
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
 from PySide6.QtGui import QPainter, QPen, QBrush, QColor
 from PySide6.QtWidgets import QWidget

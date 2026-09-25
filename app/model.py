@@ -1,4 +1,10 @@
 # app/model.py
+"""Red neuronal que clasifica una secuencia de gestos.
+
+Entrada: (lote, SEQ_LEN, FEATURE_DIM) → salida: una puntuación por gesto.
+Las convoluciones 1D recorren el eje del TIEMPO: aprenden patrones de cómo
+cambia la mano de un frame a otro.
+"""
 import torch
 import torch.nn as nn
 
@@ -12,16 +18,19 @@ class TemporalCNN(nn.Module):
         super().__init__()
 
         self.net = nn.Sequential(
+            # Mira ventanas de 5 frames seguidos
             nn.Conv1d(feature_dim, hidden, kernel_size=5, padding=2),
             nn.ReLU(),
             nn.Dropout(dropout),
 
+            # Combina los patrones anteriores en ventanas de 3
             nn.Conv1d(hidden, hidden, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Dropout(dropout),
 
             nn.AdaptiveAvgPool1d(1),  # -> (B, hidden, 1)
         )
+        # Resumen de toda la secuencia → una puntuación por gesto
         self.fc = nn.Linear(hidden, num_classes)
 
     def forward(self, x):

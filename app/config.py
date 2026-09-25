@@ -1,14 +1,23 @@
 # app/config.py
+# 🎤 うっせぇわ、うっせぇわ、うっせぇわ — Ado
+"""Parámetros globales de la app.
+
+Todos los módulos leen de aquí: rutas de archivos, tamaño de las secuencias,
+hiperparámetros de entrenamiento y ajustes de la predicción en vivo.
+Si cambias SEQ_LEN o FEATURE_DIM, los datasets/modelos viejos dejan de servir.
+"""
 import os
 import json
 
-MODEL_TASK_PATH = "hand_landmarker.task"
-LSTM_CKPT_PATH = "lstm_3gestures.pt"
+# --- Rutas (relativas a la carpeta desde donde se ejecuta run.py) ---
+MODEL_TASK_PATH = "hand_landmarker.task"     # detector de manos de MediaPipe
+LSTM_CKPT_PATH = "lstm_3gestures.pt"         # pesos entrenados (nombre histórico: hoy es una TemporalCNN)
 DATASET_ENC_PATH = "dataset_lsc_3gestos.enc"   # AES-encrypted dataset
 AUTH_PATH = "auth.enc"                         # password verifier (encrypted known phrase)
 
-MAX_CONSEC_LOST = 999999
-MIN_VALID_FRAMES = 5
+# --- Grabación ---
+MAX_CONSEC_LOST = 999999   # frames seguidos sin mano antes de descartar la muestra (≈ sin límite)
+MIN_VALID_FRAMES = 5       # mínimo de frames con mano real para aceptar una muestra
 
 # --- speed ---
 DETECT_W = 640          # ancho para MediaPipe (baja a 512 si quieres más FPS)

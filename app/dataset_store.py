@@ -1,3 +1,10 @@
+"""Dataset de muestras grabadas.
+
+Mantiene en memoria dos listas paralelas:
+    X[i]: secuencia (SEQ_LEN, FEATURE_DIM) de una muestra
+    y[i]: etiqueta del gesto (0, 1 o 2)
+y las persiste cifradas con crypto_store cada vez que cambian.
+"""
 import os
 import numpy as np
 from . import config as cfg
@@ -15,6 +22,8 @@ class DatasetStore:
         self.X: list = []
         self.y: list = []
 
+        # Si ya hay un dataset guardado, se carga al iniciar. Si falla, se
+        # guarda el error y save() se niega a sobrescribir el archivo
         if password and os.path.exists(self.enc_path):
             try:
                 self._load()
